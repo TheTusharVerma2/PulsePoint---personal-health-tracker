@@ -1,6 +1,3 @@
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
-
 export function exportActivitiesCSV(activities: any[]) {
   if (!activities || activities.length === 0) return;
 
@@ -51,9 +48,14 @@ export async function exportReportToPDF(elementId: string) {
   if (!element) return;
 
   try {
+    const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+      import('html2canvas'),
+      import('jspdf'),
+    ]);
+
     const canvas = await html2canvas(element, {
       scale: 2,
-      backgroundColor: '#0f172a',
+      backgroundColor: '#f7f8f5',
       logging: false,
       useCORS: true
     });

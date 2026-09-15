@@ -1,793 +1,1521 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Flame, 
-  Moon, 
-  Plus, 
-  Utensils,
-  Trash2,
-  FileSpreadsheet,
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
+import {
+  Activity,
+  Apple,
+  BarChart3,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   Download,
+  Dumbbell,
+  Flame,
+  Footprints,
+  LogOut,
+  Moon,
+  Plus,
+  Settings,
   Sparkles,
-  Calendar
+  Utensils,
+  X,
 } from 'lucide-react';
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
 
-import { Navbar } from './components/Navbar';
-import { ActivityRings } from './components/ActivityRings';
-import { ReadinessGauge } from './components/ReadinessGauge';
+import { AuthModal } from './components/AuthModal';
 import { LogActivityModal } from './components/LogActivityModal';
 import { LogMealModal } from './components/LogMealModal';
-import { AuthModal } from './components/AuthModal';
-import { MilestonesModal } from './components/MilestonesModal';
-import { generateHealthInsights, HealthInsight } from './utils/insightsEngine';
-import { exportActivitiesCSV, exportNutritionCSV, exportReportToPDF } from './utils/exportUtils';
+import {
+  exportActivitiesCSV,
+  exportNutritionCSV,
+  exportReportToPDF,
+} from './utils/exportUtils';
 
 const API_URL = 'http://localhost:5001/api';
 
-const ActivityItemCard: React.FC<{ act: any; onDelete: (id: number) => void }> = ({ act, onDelete }) => {
-  const iconBg = act.type === 'sleep' ? 'rgba(139, 92, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)';
-  const iconCol = act.type === 'sleep' ? '#8b5cf6' : '#10b981';
-  const burnStr = act.calories_burned > 0 ? ' • ' + act.calories_burned + ' kcal' : '';
+type View = 'today' | 'activity' | 'meals' | 'trends' | 'profile';
+type ActivityFilter = 'all' | 'workouts' | 'sleep';
+type TrendMetric = 'calories' | 'steps';
+type ThemePreference = 'system' | 'light' | 'dark';
+
+type User = {
+  username: string;
+  email: string;
+};
+
+type ActivityLog = {
+  id: number;
+  type: string;
+  duration_minutes: number;
+  calories_burned: number;
+  steps: number;
+  date: string;
+  created_at?: string;
+};
+
+type Meal = {
+  id: number;
+  meal_name: string;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  date: string;
+  created_at?: string;
+};
+
+type Goals = {
+  daily_step_goal: number;
+  daily_calorie_burn_goal: number;
+  daily_calorie_intake_goal: number;
+  daily_protein_goal: number;
+};
+
+type Metrics = {
+  last7Days: Array<{
+    name: string;
+    date: string;
+    calories: number;
+    calories_consumed: number;
+    steps: number;
+  }>;
+  monthlySummary: {
+    total_calories_burned: number;
+    total_steps: number;
+    avg_workout_duration: number;
+  };
+};
+
+const defaultGoals: Goals = {
+  daily_step_goal: 10000,
+  daily_calorie_burn_goal: 2000,
+  daily_calorie_intake_goal: 2200,
+  daily_protein_goal: 120,
+};
+
+const emptyMetrics: Metrics = {
+  last7Days: [],
+  monthlySummary: {
+    total_calories_burned: 0,
+    total_steps: 0,
+    avg_workout_duration: 0,
+  },
+};
+
+const numberValue = (value: unknown) => Number(value || 0);
+
+const dateKey = (value: string) => {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const date = new Date(value);
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+};
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const changeDate = (date: string, days: number) => {
+  const nextDate = new Date(`${date}T12:00:00`);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate.toISOString().slice(0, 10);
+};
+
+const longDate = (date: string) =>
+  new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+
+const shortDate = (value: string) =>
+  new Date(`${dateKey(value)}T12:00:00`).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+const activityIcon = (type: string) =>
+  type === 'sleep' ? <Moon /> : <Dumbbell />;
+
+function ProgressCard({
+  label,
+  value,
+  goal,
+  unit,
+  color,
+  icon,
+}: {
+  label: string;
+  value: number;
+  goal: number;
+  unit: string;
+  color: string;
+  icon: ReactNode;
+}) {
+  const progress = Math.min(100, Math.round((value / Math.max(goal, 1)) * 100));
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0.85rem 1rem',
-        borderRadius: '0.75rem',
-        background: 'rgba(255, 255, 255, 0.03)',
-        border: '1px solid var(--border-glass)'
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-        <div
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: '50%',
-            background: iconBg,
-            color: iconCol,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
+    <article className="progress-card">
+      <div className="progress-card__top">
+        <span
+          className="metric-icon"
+          style={{ color, backgroundColor: `${color}18` }}
         >
-          {act.type === 'sleep' ? <Moon size={18} /> : <Flame size={18} />}
-        </div>
-        <div>
-          <h4 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'capitalize' }}>{act.type}</h4>
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            {act.duration_minutes + ' min' + burnStr}
-          </p>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>
-          {new Date(act.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          {icon}
         </span>
-        <button className="btn-delete" onClick={() => onDelete(act.id)}>
-          <Trash2 size={16} />
-        </button>
-      </div>
-    </div>
-  );
-};
-
-const MealItemCard: React.FC<{ meal: any; onDelete: (id: number) => void }> = ({ meal, onDelete }) => {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '1.15rem 1.5rem',
-        borderRadius: '0.85rem',
-        background: 'rgba(255, 255, 255, 0.02)',
-        border: '1px solid var(--border-glass)'
-      }}
-    >
-      <div>
-        <h4 style={{ fontSize: '1rem', fontWeight: 700 }}>{meal.meal_name}</h4>
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '0.35rem', fontSize: '0.8rem' }}>
-          <span style={{ color: 'var(--neon-amber)', fontWeight: 600 }}>P: {meal.protein_g}g</span>
-          <span style={{ color: 'var(--neon-cyan)', fontWeight: 600 }}>C: {meal.carbs_g}g</span>
-          <span style={{ color: 'var(--neon-coral)', fontWeight: 600 }}>F: {meal.fat_g}g</span>
-        </div>
+        <span>{label}</span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)' }}>{meal.calories} kcal</div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            {new Date(meal.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-          </span>
-        </div>
-        <button className="btn-delete" onClick={() => onDelete(meal.id)}>
-          <Trash2 size={18} />
-        </button>
+      <strong>
+        {value.toLocaleString()}
+        <small>
+          {' '}
+          / {goal.toLocaleString()} {unit}
+        </small>
+      </strong>
+
+      <div className="progress-track" aria-label={`${label}: ${progress}% complete`}>
+        <span style={{ width: `${progress}%`, backgroundColor: color }} />
       </div>
-    </div>
+
+      <p>
+        {progress >= 100
+          ? 'Goal reached'
+          : `${Math.max(0, goal - value).toLocaleString()} ${unit} to go`}
+      </p>
+    </article>
   );
-};
+}
 
 function App() {
-  const [activities, setActivities] = useState<any[]>([]);
-  const [metricsData, setMetricsData] = useState<any>({ last7Days: [], macros: {}, monthlySummary: {} });
-  const [nutrition, setNutrition] = useState<any[]>([]);
-  const [goals, setGoals] = useState<any>({
-    daily_step_goal: 10000,
-    daily_calorie_burn_goal: 2000,
-    daily_calorie_intake_goal: 2200,
-    daily_protein_goal: 120
+  const [view, setView] = useState<View>('today');
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all');
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>('calories');
+  const [selectedDate, setSelectedDate] = useState(todayISO());
+
+  const [activities, setActivities] = useState<ActivityLog[]>([]);
+  const [meals, setMeals] = useState<Meal[]>([]);
+  const [goals, setGoals] = useState<Goals>(defaultGoals);
+  const [metrics, setMetrics] = useState<Metrics>(emptyMetrics);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [activityModalOpen, setActivityModalOpen] = useState(false);
+  const [mealModalOpen, setMealModalOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+
+  const [token, setToken] = useState<string | null>(() =>
+    localStorage.getItem('pulsepoint_token'),
+  );
+
+  const [user, setUser] = useState<User | null>(() =>
+    JSON.parse(localStorage.getItem('pulsepoint_user') || 'null'),
+  );
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
+    const savedTheme = localStorage.getItem('pulsepoint_theme');
+    return savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system'
+      ? savedTheme
+      : 'system';
   });
 
-  const [token, setToken] = useState<string | null>(localStorage.getItem('pulsepoint_token'));
-  const [user, setUser] = useState<any>(JSON.parse(localStorage.getItem('pulsepoint_user') || 'null'));
+const authHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {};
 
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [isMilestonesModalOpen, setIsMilestonesModalOpen] = useState(false);
-  const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
-  const [isMealModalOpen, setIsMealModalOpen] = useState(false);
-  const [_loading, setLoading] = useState(true);
-  const [currentView, setCurrentView] = useState('dashboard');
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
 
-  const [goalsFormData, setGoalsFormData] = useState({
-    daily_step_goal: 10000,
-    daily_calorie_burn_goal: 2000,
-    daily_calorie_intake_goal: 2200,
-    daily_protein_goal: 120
-  });
+  return headers;
+};
 
-  const getAuthHeaders = (): Record<string, string> => {
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers.Authorization = 'Bearer ' + token;
-    }
-    return headers;
-  };
+  const loadData = async () => {
+    setLoading(true);
+    setError('');
 
-  const fetchData = async () => {
     try {
-      setLoading(true);
-      const headers = getAuthHeaders();
-      const [activitiesRes, metricsRes, nutritionRes, goalsRes] = await Promise.all([
-        fetch(API_URL + '/activities', { headers }),
-        fetch(API_URL + '/metrics', { headers }),
-        fetch(API_URL + '/nutrition', { headers }),
-        fetch(API_URL + '/goals', { headers })
-      ]);
+      const [activitiesResponse, mealsResponse, goalsResponse, metricsResponse] =
+        await Promise.all(
+          ['activities', 'nutrition', 'goals', 'metrics'].map((path) =>
+            fetch(`${API_URL}/${path}`, { headers: authHeaders() }),
+          ),
+        );
 
-      const activitiesData = await activitiesRes.json();
-      const metricsResp = await metricsRes.json();
-      const nutritionData = await nutritionRes.json();
-      const goalsData = await goalsRes.json();
-
-      if (Array.isArray(activitiesData)) setActivities(activitiesData);
-      if (metricsResp && metricsResp.last7Days) setMetricsData(metricsResp);
-      if (Array.isArray(nutritionData)) setNutrition(nutritionData);
-      if (goalsData && !goalsData.error) {
-        setGoals(goalsData);
-        setGoalsFormData({
-          daily_step_goal: goalsData.daily_step_goal || 10000,
-          daily_calorie_burn_goal: goalsData.daily_calorie_burn_goal || 2000,
-          daily_calorie_intake_goal: goalsData.daily_calorie_intake_goal || 2200,
-          daily_protein_goal: goalsData.daily_protein_goal || 120
-        });
+      if (
+        ![
+          activitiesResponse,
+          mealsResponse,
+          goalsResponse,
+          metricsResponse,
+        ].every((response) => response.ok)
+      ) {
+        throw new Error('We could not refresh your health data.');
       }
-    } catch (error) {
-      console.error('Error fetching biometrics:', error);
+
+      const [nextActivities, nextMeals, nextGoals, nextMetrics] =
+        await Promise.all([
+          activitiesResponse.json(),
+          mealsResponse.json(),
+          goalsResponse.json(),
+          metricsResponse.json(),
+        ]);
+
+      setActivities(nextActivities);
+      setMeals(nextMeals);
+      setGoals({ ...defaultGoals, ...nextGoals });
+      setMetrics(nextMetrics);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : 'Something went wrong while loading your data.',
+      );
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
+    loadData();
   }, [token]);
 
-  const handleAuthSuccess = (newToken: string, newUser: any) => {
-    setToken(newToken);
-    setUser(newUser);
-    fetchData();
-  };
+  useEffect(() => {
+    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const resolvedTheme = themePreference === 'system'
+      ? systemPrefersDark ? 'dark' : 'light'
+      : themePreference;
 
-  const handleLogout = () => {
-    localStorage.removeItem('pulsepoint_token');
-    localStorage.removeItem('pulsepoint_user');
-    setToken(null);
-    setUser(null);
-    fetchData();
-  };
+    document.documentElement.dataset.theme = resolvedTheme;
+    localStorage.setItem('pulsepoint_theme', themePreference);
+  }, [themePreference]);
 
-  const handleSaveActivity = async (activityPayload: any) => {
-    try {
-      const response = await fetch(API_URL + '/activities', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify(activityPayload)
-      });
-      if (response.ok) {
-        fetchData();
-      }
-    } catch (error) {
-      console.error('Failed to log activity:', error);
-    }
-  };
+  const day = useMemo(() => {
+    const dateActivities = activities.filter(
+      (activity) => dateKey(activity.date) === selectedDate,
+    );
 
-  const handleSaveMeal = async (mealPayload: any) => {
-    try {
-      const response = await fetch(API_URL + '/nutrition', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify(mealPayload)
-      });
-      if (response.ok) {
-        fetchData();
-      }
-    } catch (error) {
-      console.error('Failed to log meal:', error);
-    }
-  };
+    const dateMeals = meals.filter(
+      (meal) => dateKey(meal.date) === selectedDate,
+    );
 
-  const handleDeleteActivity = async (id: number) => {
-    try {
-      const response = await fetch(API_URL + '/activities/' + id, {
-        method: 'DELETE',
-        headers: getAuthHeaders()
-      });
-      if (response.ok) {
-        setActivities(activities.filter(a => a.id !== id));
-        fetchData();
-      }
-    } catch (error) {
-      console.error('Failed to delete activity:', error);
-    }
-  };
+    const workouts = dateActivities.filter(
+      (activity) => activity.type !== 'sleep',
+    );
 
-  const handleDeleteNutrition = async (id: number) => {
-    try {
-      const response = await fetch(API_URL + '/nutrition/' + id, {
-        method: 'DELETE',
-        headers: getAuthHeaders()
-      });
-      if (response.ok) {
-        setNutrition(nutrition.filter(n => n.id !== id));
-        fetchData();
-      }
-    } catch (error) {
-      console.error('Failed to delete meal log:', error);
-    }
-  };
+    const sleepSessions = dateActivities.filter(
+      (activity) => activity.type === 'sleep',
+    );
 
-  const handleSaveGoals = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const response = await fetch(API_URL + '/goals', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify(goalsFormData)
-      });
-      if (response.ok) {
-        const updated = await response.json();
-        setGoals(updated);
-        alert('Goals & targets updated successfully!');
-      }
-    } catch (error) {
-      console.error('Failed to update goals:', error);
-    }
-  };
+    return {
+      activities: dateActivities,
+      meals: dateMeals,
+      steps: dateActivities.reduce(
+        (total, activity) => total + numberValue(activity.steps),
+        0,
+      ),
+      caloriesBurned: workouts.reduce(
+        (total, activity) => total + numberValue(activity.calories_burned),
+        0,
+      ),
+      activeMinutes: workouts.reduce(
+        (total, activity) => total + numberValue(activity.duration_minutes),
+        0,
+      ),
+      sleepHours:
+        sleepSessions.reduce(
+          (total, activity) => total + numberValue(activity.duration_minutes),
+          0,
+        ) / 60,
+      caloriesConsumed: dateMeals.reduce(
+        (total, meal) => total + numberValue(meal.calories),
+        0,
+      ),
+      protein: dateMeals.reduce(
+        (total, meal) => total + numberValue(meal.protein_g),
+        0,
+      ),
+      carbs: dateMeals.reduce(
+        (total, meal) => total + numberValue(meal.carbs_g),
+        0,
+      ),
+      fat: dateMeals.reduce(
+        (total, meal) => total + numberValue(meal.fat_g),
+        0,
+      ),
+    };
+  }, [activities, meals, selectedDate]);
 
-  const totalCaloriesBurned = activities.reduce((sum, a) => sum + Number(a.calories_burned || 0), 0);
-  const totalSteps = activities.reduce((sum, a) => sum + Number(a.steps || 0), 0);
-  const totalCaloriesConsumed = nutrition.reduce((sum, n) => sum + Number(n.calories || 0), 0);
-  const totalProteinConsumed = nutrition.reduce((sum, n) => sum + Number(n.protein_g || 0), 0);
-  const totalCarbsConsumed = nutrition.reduce((sum, n) => sum + Number(n.carbs_g || 0), 0);
-  const totalFatConsumed = nutrition.reduce((sum, n) => sum + Number(n.fat_g || 0), 0);
-
-  const sleepEntries = activities.filter(a => a.type === 'sleep');
-  const avgSleep = sleepEntries.length > 0
-    ? (sleepEntries.reduce((sum, s) => sum + Number(s.duration_minutes || 0), 0) / (sleepEntries.length * 60)).toFixed(1)
-    : '7.5';
-
-  const workoutMinutesTotal = activities.filter(a => a.type !== 'sleep').reduce((sum, a) => sum + Number(a.duration_minutes || 0), 0);
-  const stepPct = Math.round((totalSteps / (goals.daily_step_goal || 10000)) * 100);
-
-  const uniqueDates = Array.from(new Set([...activities.map(a => a.date), ...nutrition.map(n => n.date)]));
-  const streakDays = Math.max(1, uniqueDates.length);
-
-  const insights: HealthInsight[] = generateHealthInsights(
-    activities,
-    nutrition,
-    metricsData.last7Days || [],
-    goals
+  const readiness = Math.max(
+    20,
+    Math.min(
+      100,
+      Math.round(
+        Math.min(40, (day.sleepHours / 8) * 40) +
+          Math.min(
+            30,
+            (day.steps / Math.max(goals.daily_step_goal, 1)) * 30,
+          ) +
+          30 -
+          (day.activeMinutes > 90 ? 10 : 0),
+      ),
+    ),
   );
 
-  const macroChartData = [
-    { name: 'Protein', value: Number(metricsData.macros?.total_protein || totalProteinConsumed || 120), color: '#f59e0b' },
-    { name: 'Carbohydrates', value: Number(metricsData.macros?.total_carbs || totalCarbsConsumed || 180), color: '#06b6d4' },
-    { name: 'Fats', value: Number(metricsData.macros?.total_fat || totalFatConsumed || 65), color: '#f43f5e' }
+  const recentEntries = [
+    ...day.activities.map((activity) => ({
+      ...activity,
+      entryType: 'activity' as const,
+      label: activity.type,
+    })),
+    ...day.meals.map((meal) => ({
+      ...meal,
+      entryType: 'meal' as const,
+      label: meal.meal_name,
+    })),
+  ].sort((first, second) =>
+    String(second.created_at || '').localeCompare(String(first.created_at || '')),
+  );
+
+  const loggedDates = new Set(
+    [...activities, ...meals].map((entry) => dateKey(entry.date)),
+  );
+
+  let streakDays = 0;
+  let streakDate = todayISO();
+
+  while (loggedDates.has(streakDate)) {
+    streakDays += 1;
+    streakDate = changeDate(streakDate, -1);
+  }
+
+  const workoutCount = activities.filter(
+    (activity) => activity.type !== 'sleep',
+  ).length;
+
+  const allTimeSteps = activities.reduce(
+    (total, activity) => total + numberValue(activity.steps),
+    0,
+  );
+
+  const milestones = [
+    {
+      title: '3 Day Momentum',
+      description: 'Log health data for 3 consecutive days.',
+      unlocked: streakDays >= 3,
+    },
+    {
+      title: '7 Day Warrior',
+      description: 'Log health data for 7 consecutive days.',
+      unlocked: streakDays >= 7,
+    },
+    {
+      title: '10K Step Club',
+      description: 'Reach 10,000 total steps.',
+      unlocked: allTimeSteps >= 10000,
+    },
+    {
+      title: 'Fitness Enthusiast',
+      description: 'Log 5 workout sessions.',
+      unlocked: workoutCount >= 5,
+    },
+    {
+      title: 'Nutrition Habit',
+      description: 'Log 10 meals.',
+      unlocked: meals.length >= 10,
+    },
   ];
 
-  const renderDashboard = () => (
-    <div>
-      <header className="top-bar">
-        <div className="header-title">
+  const openLog = (type: 'activity' | 'meal') => {
+    setQuickAddOpen(false);
+
+    if (type === 'activity') {
+      setActivityModalOpen(true);
+      return;
+    }
+
+    setMealModalOpen(true);
+  };
+
+  const saveActivity = async (payload: Omit<ActivityLog, 'id'>) => {
+    try {
+      const response = await fetch(`${API_URL}/activities`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders(),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        setNotice('Could not save activity. Please try again.');
+        return false;
+      }
+
+      const savedActivity: ActivityLog = await response.json();
+
+      setActivities((currentActivities) => [
+        savedActivity,
+        ...currentActivities,
+      ]);
+
+      setNotice('Activity saved');
+      void loadData();
+      return true;
+    } catch {
+      setNotice('Could not save activity. Please try again.');
+      return false;
+    }
+  };
+
+  const saveMeal = async (payload: Omit<Meal, 'id'>) => {
+    try {
+      const response = await fetch(`${API_URL}/nutrition`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders(),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        setNotice('Could not save meal. Please try again.');
+        return false;
+      }
+
+      const savedMeal: Meal = await response.json();
+
+      setMeals((currentMeals) => [
+        savedMeal,
+        ...currentMeals,
+      ]);
+
+      setNotice('Meal saved');
+      void loadData();
+      return true;
+    } catch {
+      setNotice('Could not save meal. Please try again.');
+      return false;
+    }
+  };
+
+  const deleteEntry = async (
+    endpoint: 'activities' | 'nutrition',
+    id: number,
+  ) => {
+    if (!window.confirm('Delete this entry? This cannot be undone.')) {
+      return;
+    }
+
+    const response = await fetch(`${API_URL}/${endpoint}/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+
+    if (!response.ok) {
+      setNotice('Could not delete this entry. Please try again.');
+      return;
+    }
+
+    setNotice('Entry deleted');
+    loadData();
+  };
+
+  const saveGoals = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const response = await fetch(`${API_URL}/goals`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+      },
+      body: JSON.stringify(goals),
+    });
+
+    if (!response.ok) {
+      setNotice('Could not save goals. Please try again.');
+      return;
+    }
+
+    setGoals(await response.json());
+    setNotice('Goals saved');
+  };
+
+  const DateControl = () => (
+    <div className="date-control" aria-label="Selected date">
+      <button
+        aria-label="Previous day"
+        onClick={() => setSelectedDate(changeDate(selectedDate, -1))}
+      >
+        <ChevronLeft />
+      </button>
+
+      <label className="date-control__input">
+        <CalendarDays />
+        <input
+          type="date"
+          value={selectedDate}
+          max={todayISO()}
+          aria-label="Choose date"
+          onChange={(event) => setSelectedDate(event.target.value)}
+        />
+      </label>
+
+      <button
+        aria-label="Next day"
+        disabled={selectedDate >= todayISO()}
+        onClick={() => setSelectedDate(changeDate(selectedDate, 1))}
+      >
+        <ChevronRight />
+      </button>
+    </div>
+  );
+
+  const renderToday = () => (
+    <>
+      <section className="page-heading">
+        <div>
+          <p className="eyebrow">{longDate(selectedDate)}</p>
           <h1>
-            Welcome back, <span className="text-gradient-emerald">{user ? user.username : 'Telemetry User'}</span>
+            {selectedDate === todayISO()
+              ? `Good day${user ? `, ${user.username}` : ''}`
+              : 'Your day at a glance'}
           </h1>
-          <p>Real-time physical strain, metabolic balance & biometric recovery</p>
+          <p>Small actions add up. Here is your progress for the day.</p>
         </div>
 
-        <div className="header-actions">
-          <button className="btn btn-secondary" onClick={() => setIsMealModalOpen(true)}>
-            <Utensils size={18} /> Log Meal
-          </button>
-          <button className="btn btn-primary" onClick={() => setIsActivityModalOpen(true)}>
-            <Plus size={18} /> Log Activity
-          </button>
-        </div>
-      </header>
+        <DateControl />
+      </section>
 
-      <div className="hero-telemetry-grid">
-        <ReadinessGauge
-          sleepHours={Number(avgSleep)}
-          workoutMinutes={workoutMinutesTotal}
-          stepPct={stepPct}
+      <section className="progress-grid">
+        <ProgressCard
+          label="Movement"
+          value={day.caloriesBurned}
+          goal={goals.daily_calorie_burn_goal}
+          unit="kcal"
+          color="#D85C4A"
+          icon={<Flame />}
         />
 
-        <ActivityRings
-          caloriesBurned={totalCaloriesBurned}
-          calorieGoal={goals.daily_calorie_burn_goal || 2000}
-          steps={totalSteps}
-          stepGoal={goals.daily_step_goal || 10000}
-          sleepHours={Number(avgSleep)}
-          sleepGoal={8}
+        <ProgressCard
+          label="Steps"
+          value={day.steps}
+          goal={goals.daily_step_goal}
+          unit="steps"
+          color="#287A52"
+          icon={<Footprints />}
         />
-      </div>
 
-      {insights.length > 0 && (
-        <div style={{ marginBottom: '2.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--neon-emerald)', fontWeight: 700 }}>
-            <Sparkles size={18} /> AI Physiological Diagnostic Engine
+        <ProgressCard
+          label="Sleep"
+          value={Number(day.sleepHours.toFixed(1))}
+          goal={8}
+          unit="hrs"
+          color="#5E67B1"
+          icon={<Moon />}
+        />
+      </section>
+
+      <section className="today-grid">
+        <article className="surface readiness">
+          <div>
+            <p className="eyebrow">Daily readiness</p>
+
+            <strong>
+              {readiness}
+              <small>/100</small>
+            </strong>
+
+            <p>
+              {readiness >= 80
+                ? 'You look ready for a normal training day.'
+                : readiness >= 60
+                  ? 'A balanced day and moderate activity may suit you.'
+                  : 'Consider making room for rest and recovery.'}
+            </p>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
-            {insights.map((insight) => {
-              const borderCol = insight.type === 'success' ? 'var(--neon-emerald)' : insight.type === 'warning' ? 'var(--neon-amber)' : 'var(--neon-cyan)';
+
+          <div
+            className="readiness-ring"
+            style={{ '--score': `${readiness * 3.6}deg` } as CSSProperties}
+          >
+            <span>
+              {readiness >= 80
+                ? 'Ready'
+                : readiness >= 60
+                  ? 'Steady'
+                  : 'Recover'}
+            </span>
+          </div>
+
+          <small>
+            Based on logged sleep, activity, and goal progress. Not medical advice.
+          </small>
+        </article>
+
+        <article className="surface insight">
+          <div className="section-title">
+            <span>
+              <Sparkles />
+              Today’s focus
+            </span>
+          </div>
+
+          <h2>
+            {day.protein >= goals.daily_protein_goal
+              ? 'Protein goal reached'
+              : day.meals.length === 0
+                ? 'Start with a meal'
+                : 'Keep protein in mind'}
+          </h2>
+
+          <p>
+            {day.protein >= goals.daily_protein_goal
+              ? `You have logged ${Math.round(day.protein)}g of protein today.`
+              : day.meals.length === 0
+                ? 'Log your first meal to see your nutrition progress.'
+                : `${Math.max(
+                    0,
+                    Math.round(goals.daily_protein_goal - day.protein),
+                  )}g of protein remains in your daily goal.`}
+          </p>
+
+          <button className="text-button" onClick={() => setView('meals')}>
+            View meals
+          </button>
+        </article>
+      </section>
+
+      <section className="surface entries">
+        <div className="section-title">
+          <h2>Today’s entries</h2>
+          <button
+            className="text-button"
+            onClick={() => setView(day.activities.length ? 'activity' : 'meals')}
+          >
+            View all
+          </button>
+        </div>
+
+        {recentEntries.length ? (
+          <div className="entry-list">
+            {recentEntries.slice(0, 4).map((entry) => (
+              <div className="entry" key={`${entry.entryType}-${entry.id}`}>
+                <span className={`entry-icon ${entry.entryType}`}>
+                  {entry.entryType === 'meal'
+                    ? <Apple />
+                    : activityIcon(entry.type)}
+                </span>
+
+                <div>
+                  <strong>{entry.label}</strong>
+                  <p>
+                    {entry.entryType === 'meal'
+                      ? `${entry.calories} kcal · ${entry.protein_g}g protein`
+                      : `${entry.duration_minutes} min${
+                          entry.steps
+                            ? ` · ${entry.steps.toLocaleString()} steps`
+                            : ''
+                        }`}
+                  </p>
+                </div>
+
+                <span>
+                  {entry.entryType === 'meal'
+                    ? `${entry.calories} kcal`
+                    : entry.type === 'sleep'
+                      ? `${(entry.duration_minutes / 60).toFixed(1)} hrs`
+                      : `${entry.calories_burned} kcal`}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty">
+            <CalendarDays />
+            <p>Nothing logged for this day yet.</p>
+            <button
+              className="button button--secondary"
+              onClick={() => setQuickAddOpen(true)}
+            >
+              <Plus />
+              Add an entry
+            </button>
+          </div>
+        )}
+      </section>
+    </>
+  );
+
+  const renderActivity = () => {
+    const dailyActivities = activities.filter(
+      (activity) => dateKey(activity.date) === selectedDate,
+    );
+    const visibleActivities = dailyActivities.filter((activity) => {
+      if (activityFilter === 'workouts') {
+        return activity.type !== 'sleep';
+      }
+
+      if (activityFilter === 'sleep') {
+        return activity.type === 'sleep';
+      }
+
+      return true;
+    });
+
+    return (
+      <>
+        <section className="page-heading">
+          <div>
+            <p className="eyebrow">Activity history</p>
+            <h1>Move in your own way</h1>
+            <p>{longDate(selectedDate)}</p>
+          </div>
+
+          <div className="page-actions">
+            <DateControl />
+
+            <button className="button" onClick={() => openLog('activity')}>
+              <Plus />
+              Add activity
+            </button>
+          </div>
+        </section>
+
+        <section className="summary-strip">
+          <span>
+            <Footprints />
+            <b>{day.steps.toLocaleString()}</b> steps
+          </span>
+          <span>
+            <Flame />
+            <b>{day.caloriesBurned}</b> kcal burned
+          </span>
+          <span>
+            <Activity />
+            <b>{day.activeMinutes}</b> active min
+          </span>
+          <span>
+            <Moon />
+            <b>{day.sleepHours.toFixed(1)}</b> hours sleep
+          </span>
+        </section>
+
+        <div className="filter-control" role="group" aria-label="Activity filter">
+          {[
+            ['all', 'All'],
+            ['workouts', 'Workouts'],
+            ['sleep', 'Sleep'],
+          ].map(([filter, label]) => (
+            <button
+              key={filter}
+              type="button"
+              className={activityFilter === filter ? 'active' : ''}
+              onClick={() => setActivityFilter(filter as ActivityFilter)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <ActivityList
+          items={visibleActivities}
+          onDelete={(id) => deleteEntry('activities', id)}
+          onAdd={() => openLog('activity')}
+        />
+      </>
+    );
+  };
+
+  const renderMeals = () => {
+    const dailyMeals = meals.filter(
+      (meal) => dateKey(meal.date) === selectedDate,
+    );
+
+    return (
+      <>
+        <section className="page-heading">
+          <div>
+            <p className="eyebrow">Nutrition</p>
+            <h1>Food for your day</h1>
+            <p>{longDate(selectedDate)}</p>
+          </div>
+
+          <div className="page-actions">
+            <DateControl />
+
+            <button className="button" onClick={() => openLog('meal')}>
+              <Plus />
+              Add meal
+            </button>
+          </div>
+        </section>
+
+        <section className="nutrition-summary surface">
+          <div>
+            <p className="eyebrow">Energy</p>
+            <strong>
+              {day.caloriesConsumed.toLocaleString()}
+              <small>
+                {' '}
+                / {goals.daily_calorie_intake_goal.toLocaleString()} kcal
+              </small>
+            </strong>
+
+            <div className="progress-track">
+              <span
+                style={{
+                  width: `${Math.min(
+                    100,
+                    (day.caloriesConsumed / goals.daily_calorie_intake_goal) * 100,
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="macro-list">
+            {[
+              ['Protein', day.protein, 'protein'],
+              ['Carbohydrates', day.carbs, 'carbs'],
+              ['Fat', day.fat, 'fat'],
+            ].map(([label, value, tone]) => {
+              const totalMacros = Math.max(day.protein + day.carbs + day.fat, 1);
+              const percentage = (Number(value) / totalMacros) * 100;
+
               return (
-                <div
-                  key={insight.id}
-                  className="glass-card"
-                  style={{ borderLeft: '4px solid ' + borderCol }}
-                >
-                  <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '0.35rem' }}>
-                    {insight.title}
-                  </h4>
-                  <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>{insight.message}</p>
-                  {insight.actionHint && (
-                    <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--neon-emerald)', fontWeight: 600 }}>
-                      ⚡ {insight.actionHint}
-                    </div>
-                  )}
+                <div className="macro" key={String(label)}>
+                  <span>{String(label)}</span>
+                  <b>{Math.round(Number(value))}g</b>
+                  <i>
+                    <span className={String(tone)} style={{ width: `${percentage}%` }} />
+                  </i>
                 </div>
               );
             })}
           </div>
-        </div>
-      )}
+        </section>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '1.5rem' }}>
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <div>
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 800 }}>7-Day Biometric Telemetry</h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Workouts, Calorie Burn vs. Intake Correlation</p>
-            </div>
-            <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', fontWeight: 600 }}>
-              <span style={{ color: 'var(--neon-emerald)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>● Steps</span>
-              <span style={{ color: 'var(--neon-cyan)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>● Burned</span>
-              <span style={{ color: 'var(--neon-amber)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>● Intake</span>
-            </div>
+        <MealList
+          items={dailyMeals}
+          onDelete={(id) => deleteEntry('nutrition', id)}
+          onAdd={() => openLog('meal')}
+        />
+      </>
+    );
+  };
+
+  const hasTrendData = metrics.last7Days.some((trendDay) =>
+    trendMetric === 'calories'
+      ? Number(trendDay.calories) > 0 || Number(trendDay.calories_consumed) > 0
+      : Number(trendDay.steps) > 0,
+  );
+
+  const renderTrends = () => (
+    <>
+      <section className="page-heading">
+        <div>
+          <p className="eyebrow">Last 7 days</p>
+          <h1>Notice your patterns</h1>
+          <p>Your activity and nutrition summary over the past week.</p>
+        </div>
+
+        <div className="export-actions">
+          <button
+            className="button button--secondary"
+            onClick={() => exportActivitiesCSV(activities)}
+          >
+            <Download />
+            Activity CSV
+          </button>
+
+          <button
+            className="button button--secondary"
+            onClick={() => exportNutritionCSV(meals)}
+          >
+            <Download />
+            Meals CSV
+          </button>
+        </div>
+      </section>
+
+      <div className="filter-control" role="group" aria-label="Trend metric">
+        <button
+          type="button"
+          className={trendMetric === 'calories' ? 'active' : ''}
+          onClick={() => setTrendMetric('calories')}
+        >
+          Calories
+        </button>
+        <button
+          type="button"
+          className={trendMetric === 'steps' ? 'active' : ''}
+          onClick={() => setTrendMetric('steps')}
+        >
+          Steps
+        </button>
+      </div>
+
+      <section id="pdf-report-container" className="surface chart-card">
+        <div className="section-title">
+          <div>
+            <h2>
+              {trendMetric === 'calories'
+                ? 'Calories burned and consumed'
+                : 'Daily steps'}
+            </h2>
+            <p>
+              {trendMetric === 'calories'
+                ? 'Compare activity calories with food calories for each day.'
+                : 'Your logged steps for each day.'}
+            </p>
           </div>
 
-          <div style={{ height: 320 }}>
+          <button
+            className="text-button"
+            onClick={() => exportReportToPDF('pdf-report-container')}
+          >
+            Create PDF
+          </button>
+        </div>
+
+        {hasTrendData ? (
+          <div className="chart">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={metricsData.last7Days || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <AreaChart data={metrics.last7Days}>
                 <defs>
-                  <linearGradient id="gradientSteps" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  <linearGradient id="burn" x1="0" x2="0" y1="0" y2="1">
+                    <stop stopColor="#D85C4A" stopOpacity=".3" />
+                    <stop offset="1" stopColor="#D85C4A" stopOpacity="0" />
                   </linearGradient>
-                  <linearGradient id="gradientBurn" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="gradientIntake" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                  <linearGradient id="steps" x1="0" x2="0" y1="0" y2="1">
+                    <stop stopColor="#287A52" stopOpacity=".3" />
+                    <stop offset="1" stopColor="#287A52" stopOpacity="0" />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis dataKey="name" stroke="var(--text-subtle)" tickLine={false} axisLine={false} />
-                <YAxis yAxisId="left" stroke="var(--text-subtle)" tickLine={false} axisLine={false} />
-                <YAxis yAxisId="right" orientation="right" stroke="var(--text-subtle)" tickLine={false} axisLine={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.95)', borderColor: 'var(--border-glass)', borderRadius: '0.75rem', color: '#fff' }}
-                />
-                <Area yAxisId="left" type="monotone" dataKey="steps" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#gradientSteps)" />
-                <Area yAxisId="right" type="monotone" dataKey="calories" stroke="#06b6d4" strokeWidth={3} fillOpacity={1} fill="url(#gradientBurn)" />
-                <Area yAxisId="right" type="monotone" dataKey="calories_consumed" stroke="#f59e0b" strokeWidth={3} fillOpacity={1} fill="url(#gradientIntake)" />
+
+                <CartesianGrid vertical={false} stroke="#E6EAE4" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                <YAxis axisLine={false} tickLine={false} />
+                <Tooltip />
+
+                {trendMetric === 'calories' ? (
+                  <>
+                    <Area type="monotone" dataKey="calories" name="Burned" stroke="#D85C4A" fill="url(#burn)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="calories_consumed" name="Consumed" stroke="#B56A15" fill="none" strokeWidth={2} />
+                  </>
+                ) : (
+                  <Area type="monotone" dataKey="steps" name="Steps" stroke="#287A52" fill="url(#steps)" strokeWidth={2} />
+                )}
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </div>
-
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <h3 style={{ fontSize: '1.15rem', fontWeight: 800 }}>Recent Telemetry</h3>
-            <button className="btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }} onClick={() => setCurrentView('schedule')}>
-              View All
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', overflowY: 'auto', maxHeight: '300px' }}>
-            {activities.length === 0 ? (
-              <div style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '3rem' }}>No telemetry logs recorded.</div>
-            ) : (
-              activities.slice(0, 5).map((act) => (
-                <ActivityItemCard key={act.id} act={act} onDelete={handleDeleteActivity} />
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderNutrition = () => (
-    <div>
-      <header className="top-bar">
-        <div className="header-title">
-          <h1>
-            Macronutrient <span className="text-gradient-amber">Nutrition Lab</span>
-          </h1>
-          <p>Caloric intake, macro distribution dials, and meal tracking</p>
-        </div>
-
-        <div className="header-actions">
-          <button className="btn btn-secondary" onClick={() => exportNutritionCSV(nutrition)}>
-            <FileSpreadsheet size={18} /> Export CSV
-          </button>
-          <button className="btn btn-primary" onClick={() => setIsMealModalOpen(true)}>
-            <Plus size={18} /> Log Meal
-          </button>
-        </div>
-      </header>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.25rem', marginBottom: '2.5rem' }}>
-        <div className="glass-card">
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>TOTAL ENERGY</span>
-          <h2 style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--text-main)', margin: '0.25rem 0' }}>
-            {totalCaloriesConsumed} <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>/ {goals.daily_calorie_intake_goal || 2200} kcal</span>
-          </h2>
-          <div style={{ height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{ width: Math.min(100, Math.round((totalCaloriesConsumed / (goals.daily_calorie_intake_goal || 2200)) * 100)) + '%', height: '100%', background: 'var(--neon-emerald)' }}></div>
-          </div>
-        </div>
-
-        <div className="glass-card">
-          <span style={{ fontSize: '0.8rem', color: 'var(--neon-amber)', fontWeight: 600 }}>PROTEIN TARGET</span>
-          <h2 style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--neon-amber)', margin: '0.25rem 0' }}>
-            {totalProteinConsumed}g <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>/ {goals.daily_protein_goal || 120}g</span>
-          </h2>
-          <div style={{ height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{ width: Math.min(100, Math.round((totalProteinConsumed / (goals.daily_protein_goal || 120)) * 100)) + '%', height: '100%', background: 'var(--neon-amber)' }}></div>
-          </div>
-        </div>
-
-        <div className="glass-card">
-          <span style={{ fontSize: '0.8rem', color: 'var(--neon-cyan)', fontWeight: 600 }}>CARBOHYDRATES</span>
-          <h2 style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--neon-cyan)', margin: '0.25rem 0' }}>
-            {totalCarbsConsumed}g
-          </h2>
-          <div style={{ height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{ width: '65%', height: '100%', background: 'var(--neon-cyan)' }}></div>
-          </div>
-        </div>
-
-        <div className="glass-card">
-          <span style={{ fontSize: '0.8rem', color: 'var(--neon-coral)', fontWeight: 600 }}>FATS BALANCE</span>
-          <h2 style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--neon-coral)', margin: '0.25rem 0' }}>
-            {totalFatConsumed}g
-          </h2>
-          <div style={{ height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{ width: '45%', height: '100%', background: 'var(--neon-coral)' }}></div>
-          </div>
-        </div>
-      </div>
-
-      <div className="glass-card">
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '1.5rem' }}>Recorded Meal Entries</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '500px', overflowY: 'auto' }}>
-          {nutrition.length === 0 ? (
-            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '3rem' }}>
-              No meals logged yet. Click "Log Meal" to add your first nutrition entry.
-            </div>
-          ) : (
-            nutrition.map((meal) => (
-              <MealItemCard key={meal.id} meal={meal} onDelete={handleDeleteNutrition} />
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderSchedule = () => (
-    <div>
-      <header className="top-bar">
-        <div className="header-title">
-          <h1>
-            Workout <span className="text-gradient-cyan">Schedule & Planner</span>
-          </h1>
-          <p>Schedule future workouts and monitor planned session activity</p>
-        </div>
-
-        <div className="header-actions">
-          <button className="btn btn-primary" onClick={() => setIsActivityModalOpen(true)}>
-            <Plus size={18} /> Plan Workout
-          </button>
-        </div>
-      </header>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.25rem' }}>
-        {activities.length > 0 ? (
-          activities.map((act) => (
-            <div key={act.id} className="glass-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-                <div style={{ width: 48, height: 48, borderRadius: '0.85rem', background: 'rgba(6, 182, 212, 0.15)', color: 'var(--neon-cyan)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Calendar size={24} />
-                </div>
-                <div>
-                  <h4 style={{ fontSize: '1.1rem', fontWeight: 800, textTransform: 'uppercase' }}>{act.type} SESSION</h4>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Planned for {act.duration_minutes} minutes</p>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                  {new Date(act.date).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-                </span>
-                <button className="btn-delete" onClick={() => handleDeleteActivity(act.id)}>
-                  <Trash2 size={18} />
-                </button>
-              </div>
-            </div>
-          ))
         ) : (
-          <div className="glass-card" style={{ textAlign: 'center', padding: '4rem' }}>
-            <Calendar size={64} style={{ color: 'var(--neon-cyan)', opacity: 0.5, marginBottom: '1rem' }} />
-            <h3>No Scheduled Activities</h3>
-            <p style={{ color: 'var(--text-muted)' }}>Click "Plan Workout" to add upcoming training sessions.</p>
+          <div className="chart-empty">
+            <BarChart3 />
+            <p>No {trendMetric} data has been logged in the last seven days.</p>
           </div>
         )}
-      </div>
-    </div>
+      </section>
+
+      <section className="summary-grid">
+        <article className="surface">
+          <span>Movement</span>
+          <strong>
+            {numberValue(metrics.monthlySummary.total_calories_burned).toLocaleString()}
+            <small> kcal / 30 days</small>
+          </strong>
+        </article>
+
+        <article className="surface">
+          <span>Steps</span>
+          <strong>
+            {numberValue(metrics.monthlySummary.total_steps).toLocaleString()}
+            <small> / 30 days</small>
+          </strong>
+        </article>
+
+        <article className="surface">
+          <span>Typical session</span>
+          <strong>
+            {Math.round(
+              numberValue(metrics.monthlySummary.avg_workout_duration),
+            )}
+            <small> minutes</small>
+          </strong>
+        </article>
+      </section>
+    </>
   );
 
-  const renderReports = () => (
-    <div id="pdf-report-container">
-      <header className="top-bar">
-        <div className="header-title">
-          <h1>
-            Biometric <span className="text-gradient-coral">Analytics Reports</span>
-          </h1>
-          <p>30-day macro distribution pie breakdown and export tools</p>
+  const renderProfile = () => (
+    <>
+      <section className="page-heading">
+        <div>
+          <p className="eyebrow">Profile and preferences</p>
+          <h1>Set your daily goals</h1>
+          <p>Goals are personal. You can adjust them whenever you need.</p>
         </div>
+      </section>
 
-        <div className="header-actions">
-          <button className="btn btn-secondary" onClick={() => exportActivitiesCSV(activities)}>
-            <FileSpreadsheet size={18} /> Workouts CSV
-          </button>
-          <button className="btn btn-secondary" onClick={() => exportNutritionCSV(nutrition)}>
-            <FileSpreadsheet size={18} /> Meals CSV
-          </button>
-          <button className="btn btn-primary" onClick={() => exportReportToPDF('pdf-report-container')}>
-            <Download size={18} /> Export PDF Report
-          </button>
-        </div>
-      </header>
+      <form className="surface goals-form" onSubmit={saveGoals}>
+        <h2>Daily goals</h2>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '1.5rem' }}>
-        <div className="glass-card">
-          <h3 style={{ fontSize: '1.15rem', fontWeight: 800, marginBottom: '0.5rem' }}>Macronutrient Balance Ratio</h3>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Distribution of Protein, Carbohydrates, and Fats</p>
-
-          <div style={{ height: 300 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={macroChartData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={70}
-                  outerRadius={100}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {macroChartData.map((entry, index) => (
-                    <Cell key={'cell-' + index} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.95)', borderColor: 'var(--border-glass)', borderRadius: '0.75rem' }} />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <h3 style={{ fontSize: '1.15rem', fontWeight: 800 }}>30-Day Aggregated Matrix</h3>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', margin: '2rem 0' }}>
-            <div>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Total Monthly Calorie Burn</span>
-              <h2 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--neon-emerald)' }}>
-                {(metricsData.monthlySummary?.total_calories_burned || totalCaloriesBurned) + ' kcal'}
-              </h2>
-            </div>
+        {[
+          ['Steps', 'daily_step_goal', 'steps'],
+          ['Activity calories', 'daily_calorie_burn_goal', 'kcal'],
+          ['Food calories', 'daily_calorie_intake_goal', 'kcal'],
+          ['Protein', 'daily_protein_goal', 'g'],
+        ].map(([label, key, unit]) => (
+          <label key={key}>
+            <span>{label}</span>
 
             <div>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Total Monthly Step Volume</span>
-              <h2 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--neon-cyan)' }}>
-                {Number(metricsData.monthlySummary?.total_steps || totalSteps).toLocaleString() + ' steps'}
-              </h2>
+              <input
+                type="number"
+                min="0"
+                value={goals[key as keyof Goals]}
+                onChange={(event) =>
+                  setGoals({
+                    ...goals,
+                    [key]: Number(event.target.value),
+                  })
+                }
+              />
+              <small>{unit}</small>
             </div>
+          </label>
+        ))}
 
-            <div>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Average Session Duration</span>
-              <h2 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--neon-amber)' }}>
-                {Math.round(metricsData.monthlySummary?.avg_workout_duration || 45) + ' mins'}
-              </h2>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderSettings = () => (
-    <div>
-      <header className="top-bar">
-        <div className="header-title">
-          <h1>
-            Biometric <span className="text-gradient-emerald">Target Settings</span>
-          </h1>
-          <p>Customize daily activity ring goals and macronutrient targets</p>
-        </div>
-      </header>
-
-      <form onSubmit={handleSaveGoals} className="glass-card" style={{ maxWidth: '640px' }}>
-        <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '1.5rem' }}>Personal Biometric Targets</h3>
-
-        <div className="form-group">
-          <label>Daily Step Target (Exercise Ring)</label>
-          <input
-            type="number"
-            value={goalsFormData.daily_step_goal}
-            onChange={(e) => setGoalsFormData({ ...goalsFormData, daily_step_goal: parseInt(e.target.value) || 0 })}
-            required
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Daily Calorie Burn Target (Move Ring)</label>
-          <input
-            type="number"
-            value={goalsFormData.daily_calorie_burn_goal}
-            onChange={(e) => setGoalsFormData({ ...goalsFormData, daily_calorie_burn_goal: parseInt(e.target.value) || 0 })}
-            required
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Daily Calorie Intake Limit (kcal)</label>
-          <input
-            type="number"
-            value={goalsFormData.daily_calorie_intake_goal}
-            onChange={(e) => setGoalsFormData({ ...goalsFormData, daily_calorie_intake_goal: parseInt(e.target.value) || 0 })}
-            required
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Daily Protein Target (g)</label>
-          <input
-            type="number"
-            value={goalsFormData.daily_protein_goal}
-            onChange={(e) => setGoalsFormData({ ...goalsFormData, daily_protein_goal: parseInt(e.target.value) || 0 })}
-            required
-          />
-        </div>
-
-        <button type="submit" className="btn btn-primary" style={{ marginTop: '1.5rem' }}>
-          Save Biometric Targets
+        <button className="button" type="submit">
+          Save goals
         </button>
       </form>
-    </div>
+
+      <section className="summary-grid">
+        <article className="surface">
+          <span>Current streak</span>
+          <strong>
+            {streakDays}
+            <small> day{streakDays === 1 ? '' : 's'}</small>
+          </strong>
+        </article>
+
+        <article className="surface">
+          <span>Workouts logged</span>
+          <strong>
+            {workoutCount}
+            <small> all time</small>
+          </strong>
+        </article>
+
+        <article className="surface">
+          <span>Meals logged</span>
+          <strong>
+            {meals.length}
+            <small> all time</small>
+          </strong>
+        </article>
+      </section>
+
+      <section className="surface entries">
+        <div className="section-title">
+          <h2>Milestones</h2>
+          <span>{milestones.filter((milestone) => milestone.unlocked).length} unlocked</span>
+        </div>
+
+        <div className="entry-list">
+          {milestones.map((milestone) => (
+            <div className="entry" key={milestone.title}>
+              <span
+                className="entry-icon"
+                style={{
+                  color: milestone.unlocked ? '#B56A15' : 'var(--text-muted)',
+                  background: milestone.unlocked ? '#FFF4E7' : 'var(--soft)',
+                }}
+              >
+                ★
+              </span>
+
+              <div>
+                <strong>{milestone.title}</strong>
+                <p>{milestone.description}</p>
+              </div>
+
+              <span>{milestone.unlocked ? 'Unlocked' : 'In progress'}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="surface preferences">
+        <h2>Appearance</h2>
+        <p>Choose the color mode that feels best for you.</p>
+
+        <div className="theme-options" role="group" aria-label="Appearance preference">
+          {(['system', 'light', 'dark'] as ThemePreference[]).map((option) => (
+            <button
+              className={themePreference === option ? 'active' : ''}
+              key={option}
+              type="button"
+              onClick={() => setThemePreference(option)}
+            >
+              {option[0].toUpperCase() + option.slice(1)}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="surface account">
+        <h2>Account</h2>
+
+        <p>
+          {user
+            ? `${user.username} · ${user.email}`
+            : 'You are using demo mode.'}
+        </p>
+
+        {user ? (
+          <button
+            className="button button--secondary"
+            onClick={() => {
+              localStorage.removeItem('pulsepoint_token');
+              localStorage.removeItem('pulsepoint_user');
+              setToken(null);
+              setUser(null);
+            }}
+          >
+            <LogOut />
+            Sign out
+          </button>
+        ) : (
+          <button
+            className="button button--secondary"
+            onClick={() => setAuthModalOpen(true)}
+          >
+            Sign in
+          </button>
+        )}
+      </section>
+    </>
   );
 
-  return (
-    <div className="app-container">
-      <Navbar
-        currentView={currentView}
-        setCurrentView={setCurrentView}
-        user={user}
-        streakDays={streakDays}
-        onOpenAuth={() => setIsAuthModalOpen(true)}
-        onLogout={handleLogout}
-        onOpenMilestones={() => setIsMilestonesModalOpen(true)}
-        onOpenLogModal={() => setIsActivityModalOpen(true)}
-      />
+  const navigationItems: Array<{
+    id: View;
+    label: string;
+    icon: ReactNode;
+  }> = [
+    { id: 'today', label: 'Today', icon: <Activity /> },
+    { id: 'activity', label: 'Activity', icon: <Dumbbell /> },
+    { id: 'meals', label: 'Meals', icon: <Utensils /> },
+    { id: 'trends', label: 'Trends', icon: <BarChart3 /> },
+  ];
 
-      <main className="main-content">
-        {currentView === 'dashboard' && renderDashboard()}
-        {currentView === 'nutrition' && renderNutrition()}
-        {currentView === 'schedule' && renderSchedule()}
-        {currentView === 'reports' && renderReports()}
-        {currentView === 'settings' && renderSettings()}
+  return (
+    <div className="app-shell">
+      <aside className="side-nav">
+        <div className="brand">
+          <span>
+            <Activity />
+          </span>
+          PulsePoint
+        </div>
+
+        <nav>
+          {navigationItems.map((item) => (
+            <button
+              className={view === item.id ? 'active' : ''}
+              onClick={() => setView(item.id)}
+              key={item.id}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <button className="profile-nav" onClick={() => setView('profile')}>
+          <span>{user?.username?.[0]?.toUpperCase() || 'D'}</span>
+          <small>{user ? user.username : 'Demo mode'}</small>
+          <Settings />
+        </button>
+      </aside>
+
+      <main>
+        <header className="mobile-header">
+          <div className="brand">
+            <span>
+              <Activity />
+            </span>
+            PulsePoint
+          </div>
+
+          <button aria-label="Open profile" onClick={() => setView('profile')}>
+            {user?.username?.[0]?.toUpperCase() || 'D'}
+          </button>
+        </header>
+
+        {error ? (
+          <div className="error-state">
+            <p>{error}</p>
+            <button className="button button--secondary" onClick={loadData}>
+              Try again
+            </button>
+          </div>
+        ) : loading ? (
+          <div className="loading">
+            <span />
+            <span />
+            <span />
+          </div>
+        ) : (
+          <>
+            {view === 'today' && renderToday()}
+            {view === 'activity' && renderActivity()}
+            {view === 'meals' && renderMeals()}
+            {view === 'trends' && renderTrends()}
+            {view === 'profile' && renderProfile()}
+          </>
+        )}
       </main>
 
+      <nav className="bottom-nav">
+        {navigationItems.slice(0, 2).map((item) => (
+          <button
+            className={view === item.id ? 'active' : ''}
+            onClick={() => setView(item.id)}
+            key={item.id}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </button>
+        ))}
+
+        <button
+          className="add-button"
+          aria-label="Add entry"
+          onClick={() => setQuickAddOpen(true)}
+        >
+          <Plus />
+        </button>
+
+        {navigationItems.slice(2).map((item) => (
+          <button
+            className={view === item.id ? 'active' : ''}
+            onClick={() => setView(item.id)}
+            key={item.id}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {quickAddOpen && (
+        <div
+          className="sheet-backdrop"
+          onMouseDown={() => setQuickAddOpen(false)}
+        >
+          <section
+            className="quick-add"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="close"
+              aria-label="Close quick add"
+              onClick={() => setQuickAddOpen(false)}
+            >
+              <X />
+            </button>
+
+            <p className="eyebrow">Quick add</p>
+            <h2>What would you like to log?</h2>
+
+            <button onClick={() => openLog('activity')}>
+              <Dumbbell />
+              <span>
+                <b>Activity</b>
+                <small>Workout, steps, or sleep</small>
+              </span>
+            </button>
+
+            <button onClick={() => openLog('meal')}>
+              <Utensils />
+              <span>
+                <b>Meal</b>
+                <small>Food and nutrition</small>
+              </span>
+            </button>
+          </section>
+        </div>
+      )}
+
+      {notice && (
+        <div className="toast" onAnimationEnd={() => setNotice('')}>
+          {notice}
+        </div>
+      )}
+
       <LogActivityModal
-        isOpen={isActivityModalOpen}
-        onClose={() => setIsActivityModalOpen(false)}
-        onSave={handleSaveActivity}
+        isOpen={activityModalOpen}
+        initialDate={selectedDate}
+        onClose={() => setActivityModalOpen(false)}
+        onSave={saveActivity}
       />
 
       <LogMealModal
-        isOpen={isMealModalOpen}
-        onClose={() => setIsMealModalOpen(false)}
-        onSave={handleSaveMeal}
+        isOpen={mealModalOpen}
+        initialDate={selectedDate}
+        onClose={() => setMealModalOpen(false)}
+        onSave={saveMeal}
       />
 
       <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        onSuccess={handleAuthSuccess}
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
         API_URL={API_URL}
-      />
-
-      <MilestonesModal
-        isOpen={isMilestonesModalOpen}
-        onClose={() => setIsMilestonesModalOpen(false)}
-        activities={activities}
-        nutrition={nutrition}
-        streakDays={streakDays}
+        onSuccess={(nextToken, nextUser) => {
+          setToken(nextToken);
+          setUser(nextUser);
+          setAuthModalOpen(false);
+        }}
       />
     </div>
+  );
+}
+
+function ActivityList({
+  items,
+  onDelete,
+  onAdd,
+}: {
+  items: ActivityLog[];
+  onDelete: (id: number) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <section className="surface entries">
+      <div className="section-title">
+        <h2>Logged activity</h2>
+      </div>
+
+      {items.length ? (
+        <div className="entry-list">
+          {items.map((activity) => (
+            <div className="entry" key={activity.id}>
+              <span className="entry-icon activity">
+                {activityIcon(activity.type)}
+              </span>
+
+              <div>
+                <strong>
+                  {activity.type[0].toUpperCase() + activity.type.slice(1)}
+                </strong>
+                <p>
+                  {activity.duration_minutes} min · {shortDate(activity.date)}
+                </p>
+              </div>
+
+              <span>
+                {activity.type === 'sleep'
+                  ? `${(activity.duration_minutes / 60).toFixed(1)} hrs`
+                  : `${activity.calories_burned} kcal`}
+              </span>
+
+              <button
+                className="icon-button"
+                aria-label={`Delete ${activity.type}`}
+                onClick={() => onDelete(activity.id)}
+              >
+                <X />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty">
+          <Dumbbell />
+          <p>No activity logged for this day.</p>
+          <button className="button button--secondary" onClick={onAdd}>
+            <Plus />
+            Add activity
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MealList({
+  items,
+  onDelete,
+  onAdd,
+}: {
+  items: Meal[];
+  onDelete: (id: number) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <section className="surface entries">
+      <div className="section-title">
+        <h2>Meals logged</h2>
+      </div>
+
+      {items.length ? (
+        <div className="entry-list">
+          {items.map((meal) => (
+            <div className="entry" key={meal.id}>
+              <span className="entry-icon meal">
+                <Apple />
+              </span>
+
+              <div>
+                <strong>{meal.meal_name}</strong>
+                <p>
+                  {meal.protein_g}g protein · {meal.carbs_g}g carbs ·{' '}
+                  {meal.fat_g}g fat
+                </p>
+              </div>
+
+              <span>{meal.calories} kcal</span>
+
+              <button
+                className="icon-button"
+                aria-label={`Delete ${meal.meal_name}`}
+                onClick={() => onDelete(meal.id)}
+              >
+                <X />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty">
+          <Utensils />
+          <p>No meals logged for this day.</p>
+          <button className="button button--secondary" onClick={onAdd}>
+            <Plus />
+            Add meal
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 

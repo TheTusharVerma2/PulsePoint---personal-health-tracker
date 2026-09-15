@@ -1,116 +1,243 @@
-import React, { useState } from 'react';
-import { X, Flame, Moon, Dumbbell, Bike, Waves, Heart } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
+import {
+  Bike,
+  Dumbbell,
+  Flame,
+  Heart,
+  Moon,
+  Waves,
+  X,
+} from 'lucide-react';
+
+type ActivityPayload = {
+  type: string;
+  duration_minutes: number;
+  calories_burned: number;
+  steps: number;
+  date: string;
+};
 
 interface LogActivityModalProps {
   isOpen: boolean;
+  initialDate?: string;
   onClose: () => void;
-  onSave: (data: any) => void;
+  onSave: (data: ActivityPayload) => Promise<boolean>;
 }
 
-export const LogActivityModal: React.FC<LogActivityModalProps> = ({ isOpen, onClose, onSave }) => {
+const activityOptions = [
+  { id: 'running', name: 'Running', icon: <Flame />, color: '#D85C4A' },
+  { id: 'cycling', name: 'Cycling', icon: <Bike />, color: '#287A52' },
+  {
+    id: 'weightlifting',
+    name: 'Strength',
+    icon: <Dumbbell />,
+    color: '#5E67B1',
+  },
+  { id: 'swimming', name: 'Swimming', icon: <Waves />, color: '#387EA8' },
+  { id: 'yoga', name: 'Yoga', icon: <Heart />, color: '#B56A15' },
+  { id: 'sleep', name: 'Sleep', icon: <Moon />, color: '#5E67B1' },
+];
+
+export const LogActivityModal = ({
+  isOpen,
+  initialDate,
+  onClose,
+  onSave,
+}: LogActivityModalProps) => {
   const [type, setType] = useState('running');
   const [duration, setDuration] = useState('45');
   const [calories, setCalories] = useState('350');
   const [steps, setSteps] = useState('5000');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (isOpen) {
+      setDate(initialDate || new Date().toISOString().slice(0, 10));
+      setFormError('');
+    }
+  }, [isOpen, initialDate]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave({
-      type,
-      duration_minutes: parseInt(duration) || 0,
-      calories_burned: parseInt(calories) || 0,
-      steps: parseInt(steps) || 0,
-      date
-    });
-    onClose();
+  if (!isOpen) {
+    return null;
+  }
+
+  const isSleep = type === 'sleep';
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+
+    try {
+      const saved = await onSave({
+        type,
+        duration_minutes: Number(duration) || 0,
+        calories_burned: isSleep ? 0 : Number(calories) || 0,
+        steps: isSleep ? 0 : Number(steps) || 0,
+        date,
+      });
+
+      if (saved) {
+        onClose();
+      } else {
+        setFormError('Could not save activity. Please try again.');
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const activityOptions = [
-    { id: 'running', name: 'Running', icon: <Flame size={20} />, color: '#f43f5e' },
-    { id: 'cycling', name: 'Cycling', icon: <Bike size={20} />, color: '#06b6d4' },
-    { id: 'weightlifting', name: 'Weightlifting', icon: <Dumbbell size={20} />, color: '#8b5cf6' },
-    { id: 'swimming', name: 'Swimming', icon: <Waves size={20} />, color: '#3b82f6' },
-    { id: 'yoga', name: 'Yoga', icon: <Heart size={20} />, color: '#10b981' },
-    { id: 'sleep', name: 'Sleep', icon: <Moon size={20} />, color: '#a855f7' }
-  ];
-
   return (
-    <div className="modal-overlay">
-      <div className="modal-content" style={{ maxWidth: '520px' }}>
+    <div className="modal-overlay" role="presentation">
+      <section
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="activity-modal-title"
+      >
         <div className="modal-header">
           <div>
-            <h2 style={{ fontSize: '1.35rem', fontWeight: 800 }}>Log Biometric Session</h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Record workouts, steps, or sleep telemetry</p>
+            <p className="eyebrow">Activity</p>
+            <h2 id="activity-modal-title">Log your activity</h2>
+            <p style={{ color: 'var(--text-muted)', margin: '6px 0 0' }}>
+              Add a workout, a walk, or a sleep session.
+            </p>
           </div>
-          <button className="close-btn" onClick={onClose}>
-            <X size={24} />
+
+          <button className="close-btn" onClick={onClose} aria-label="Close">
+            <X />
           </button>
         </div>
 
         <form onSubmit={handleSubmit}>
-          {/* Category Selector Grid */}
+          {formError && <p className="form-error" role="alert">{formError}</p>}
           <div className="form-group">
-            <label>Select Activity Category</label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
-              {activityOptions.map((opt) => (
-                <button
-                  type="button"
-                  key={opt.id}
-                  onClick={() => setType(opt.id)}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.85rem 0.5rem',
-                    borderRadius: '0.75rem',
-                    border: `1px solid ${type === opt.id ? opt.color : 'var(--border-glass)'}`,
-                    background: type === opt.id ? `${opt.color}20` : 'rgba(255,255,255,0.02)',
-                    color: type === opt.id ? opt.color : 'var(--text-muted)',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  {opt.icon}
-                  <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{opt.name}</span>
-                </button>
-              ))}
+            <label>What did you do?</label>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                gap: '8px',
+              }}
+            >
+              {activityOptions.map((option) => {
+                const selected = type === option.id;
+
+                return (
+                  <button
+                    type="button"
+                    key={option.id}
+                    onClick={() => setType(option.id)}
+                    style={{
+                      display: 'grid',
+                      gap: '6px',
+                      padding: '12px 6px',
+                      color: selected ? option.color : 'var(--text-muted)',
+                      background: selected ? `${option.color}18` : '#fff',
+                      border: `1px solid ${
+                        selected ? option.color : 'var(--border)'
+                      }`,
+                      borderRadius: '10px',
+                      placeItems: 'center',
+                    }}
+                  >
+                    {option.icon}
+                    <span style={{ fontSize: '12px', fontWeight: 600 }}>
+                      {option.name}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '12px',
+            }}
+          >
             <div className="form-group">
-              <label>Date</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+              <label htmlFor="activity-date">Date</label>
+              <input
+                id="activity-date"
+                type="date"
+                value={date}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(event) => setDate(event.target.value)}
+                required
+              />
             </div>
 
             <div className="form-group">
-              <label>Duration (Minutes)</label>
-              <input type="number" value={duration} onChange={(e) => setDuration(e.target.value)} required />
+              <label htmlFor="activity-duration">Duration in minutes</label>
+              <input
+                id="activity-duration"
+                type="number"
+                min="1"
+                inputMode="numeric"
+                value={duration}
+                onChange={(event) => setDuration(event.target.value)}
+                required
+              />
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div className="form-group">
-              <label>Calories Burned (kcal)</label>
-              <input type="number" value={calories} onChange={(e) => setCalories(e.target.value)} />
-            </div>
+          {!isSleep && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '12px',
+              }}
+            >
+              <div className="form-group">
+                <label htmlFor="activity-calories">Calories burned</label>
+                <input
+                  id="activity-calories"
+                  type="number"
+                  min="0"
+                  inputMode="numeric"
+                  value={calories}
+                  onChange={(event) => setCalories(event.target.value)}
+                />
+              </div>
 
-            <div className="form-group">
-              <label>Step Count</label>
-              <input type="number" value={steps} onChange={(e) => setSteps(e.target.value)} />
+              <div className="form-group">
+                <label htmlFor="activity-steps">Steps</label>
+                <input
+                  id="activity-steps"
+                  type="number"
+                  min="0"
+                  inputMode="numeric"
+                  value={steps}
+                  onChange={(event) => setSteps(event.target.value)}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1.5rem' }}>
-            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary">Save Telemetry</button>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '10px',
+              marginTop: '24px',
+            }}
+          >
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
+              Cancel
+            </button>
+
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? 'Saving…' : 'Save activity'}
+            </button>
           </div>
         </form>
-      </div>
+      </section>
     </div>
   );
 };
