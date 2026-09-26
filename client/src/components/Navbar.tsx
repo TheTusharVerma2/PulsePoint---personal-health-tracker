@@ -1,12 +1,12 @@
 import React from 'react';
-import { Activity, Home, Calendar, Utensils, PieChart, Settings, Flame, LogIn, LogOut, Plus } from 'lucide-react';
+import { Activity, Home, Calendar, Utensils, PieChart, Settings, Flame, LogOut, Plus } from 'lucide-react';
 
 interface NavbarProps {
   currentView: string;
   setCurrentView: (view: string) => void;
   user: any;
   streakDays: number;
-  onOpenAuth: () => void;
+  onOpenAuth: (tab?: 'login' | 'register') => void;
   onLogout: () => void;
   onOpenMilestones: () => void;
   onOpenLogModal: () => void;
@@ -78,31 +78,39 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
 
         {/* User Card */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg, var(--neon-cyan), var(--neon-violet))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9rem', color: '#fff' }}>
-              {user ? user.username.charAt(0).toUpperCase() : 'D'}
+        {user ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg, var(--neon-cyan), var(--neon-violet))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9rem', color: '#fff' }}>
+                {user.username.charAt(0).toUpperCase()}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                  {user.username}
+                </span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  {user.email}
+                </span>
+              </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                {user ? user.username : 'Demo User'}
-              </span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                {user ? user.email : 'demo@pulsepoint.app'}
-              </span>
-            </div>
-          </div>
 
-          {user ? (
             <button className="btn-delete" onClick={onLogout} title="Sign Out">
               <LogOut size={18} />
             </button>
-          ) : (
-            <button className="btn-delete" onClick={onOpenAuth} title="Sign In">
-              <LogIn size={18} style={{ color: 'var(--neon-emerald)' }} />
-            </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Demo Mode</div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button className="btn" style={{ flex: 1, justifyContent: 'center', padding: '0.4rem', fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.05)' }} onClick={() => onOpenAuth('login')}>
+                Log In
+              </button>
+              <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center', padding: '0.4rem', fontSize: '0.8rem' }} onClick={() => onOpenAuth('register')}>
+                Register
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </aside>
   );

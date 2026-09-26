@@ -218,6 +218,12 @@ function App() {
   const [activityModalOpen, setActivityModalOpen] = useState(false);
   const [mealModalOpen, setMealModalOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
+
+  const openAuthModal = (tab: 'login' | 'register' = 'login') => {
+    setAuthModalTab(tab);
+    setAuthModalOpen(true);
+  };
 
   const [token, setToken] = useState<string | null>(() =>
     localStorage.getItem('pulsepoint_token'),
@@ -233,7 +239,71 @@ function App() {
       : 'system';
   });
 
-const authHeaders = (): Record<string, string> => {
+  const handleLogout = () => {
+    localStorage.removeItem('pulsepoint_token');
+    localStorage.removeItem('pulsepoint_user');
+    setActivities([]);
+    setMeals([]);
+    setGoals(defaultGoals);
+    setMetrics(emptyMetrics);
+    setToken(null);
+    setUser(null);
+  };
+
+  useEffect(() => {
+    const handleOAuthCallback = async () => {
+      const hash = window.location.hash;
+      const search = window.location.search;
+      if (!hash && !search) return;
+
+      const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+      const searchParams = new URLSearchParams(search);
+
+      const accessToken = params.get('access_token');
+      const idToken = params.get('id_token') || searchParams.get('credential');
+
+      if (accessToken || idToken) {
+        try {
+          const body: any = {};
+          if (idToken) body.credential = idToken;
+          if (accessToken) {
+            const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            if (res.ok) {
+              const profile = await res.json();
+              body.email = profile.email;
+              body.googleId = profile.sub;
+              body.name = profile.name;
+            }
+          }
+
+          const res = await fetch(`${API_URL}/auth/google`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json();
+
+          if (res.ok && data.token) {
+            localStorage.setItem('pulsepoint_token', data.token);
+            localStorage.setItem('pulsepoint_user', JSON.stringify(data.user));
+            setToken(data.token);
+            setUser(data.user);
+            setNotice(`Welcome back, ${data.user.username}! Signed in with Google.`);
+          }
+        } catch (err) {
+          console.error('OAuth callback error:', err);
+        } finally {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }
+    };
+
+    handleOAuthCallback();
+  }, []);
+
+  const authHeaders = (): Record<string, string> => {
   const headers: Record<string, string> = {};
 
   if (token) {
@@ -600,7 +670,25 @@ const authHeaders = (): Record<string, string> => {
           <p>Small actions add up. Here is your progress for the day.</p>
         </div>
 
-        <DateControl />
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          {!user && (
+            <div style={{ display: 'flex', gap: '0.5rem', marginRight: '0.5rem' }}>
+              <button
+                className="button button--secondary"
+                onClick={() => openAuthModal('login')}
+              >
+                Log In
+              </button>
+              <button
+                className="button button--primary"
+                onClick={() => openAuthModal('register')}
+              >
+                Register
+              </button>
+            </div>
+          )}
+          <DateControl />
+        </div>
       </section>
 
       <section className="progress-grid">
@@ -1194,23 +1282,26 @@ const authHeaders = (): Record<string, string> => {
         {user ? (
           <button
             className="button button--secondary"
-            onClick={() => {
-              localStorage.removeItem('pulsepoint_token');
-              localStorage.removeItem('pulsepoint_user');
-              setToken(null);
-              setUser(null);
-            }}
+            onClick={handleLogout}
           >
             <LogOut />
             Sign out
           </button>
         ) : (
-          <button
-            className="button button--secondary"
-            onClick={() => setAuthModalOpen(true)}
-          >
-            Sign in
-          </button>
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button
+              className="button button--secondary"
+              onClick={() => openAuthModal('login')}
+            >
+              Log In
+            </button>
+            <button
+              className="button button--primary"
+              onClick={() => openAuthModal('register')}
+            >
+              Register
+            </button>
+          </div>
         )}
       </section>
     </>
@@ -1250,11 +1341,25 @@ const authHeaders = (): Record<string, string> => {
           ))}
         </nav>
 
-        <button className="profile-nav" onClick={() => setView('profile')}>
-          <span>{user?.username?.[0]?.toUpperCase() || 'D'}</span>
-          <small>{user ? user.username : 'Demo mode'}</small>
-          <Settings />
-        </button>
+        {user ? (
+          <button className="profile-nav" onClick={() => setView('profile')}>
+            <span>{user?.username?.[0]?.toUpperCase() || 'U'}</span>
+            <small>{user.username}</small>
+            <Settings />
+          </button>
+        ) : (
+          <div style={{ padding: '0.5rem 0', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Demo Mode</div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button className="button button--secondary" style={{ flex: 1, justifyContent: 'center', padding: '0.4rem', fontSize: '0.8rem' }} onClick={() => openAuthModal('login')}>
+                Log In
+              </button>
+              <button className="button button--primary" style={{ flex: 1, justifyContent: 'center', padding: '0.4rem', fontSize: '0.8rem' }} onClick={() => openAuthModal('register')}>
+                Register
+              </button>
+            </div>
+          </div>
+        )}
       </aside>
 
       <main>
@@ -1266,9 +1371,21 @@ const authHeaders = (): Record<string, string> => {
             PulsePoint
           </div>
 
-          <button aria-label="Open profile" onClick={() => setView('profile')}>
-            {user?.username?.[0]?.toUpperCase() || 'D'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {!user && (
+              <>
+                <button className="button button--secondary" style={{ padding: '0.35rem 0.6rem', fontSize: '0.8rem' }} onClick={() => openAuthModal('login')}>
+                  Log In
+                </button>
+                <button className="button button--primary" style={{ padding: '0.35rem 0.6rem', fontSize: '0.8rem' }} onClick={() => openAuthModal('register')}>
+                  Register
+                </button>
+              </>
+            )}
+            <button aria-label="Open profile" onClick={() => setView('profile')}>
+              {user?.username?.[0]?.toUpperCase() || 'D'}
+            </button>
+          </div>
         </header>
 
         {error ? (
@@ -1388,9 +1505,14 @@ const authHeaders = (): Record<string, string> => {
 
       <AuthModal
         isOpen={authModalOpen}
+        initialTab={authModalTab}
         onClose={() => setAuthModalOpen(false)}
         API_URL={API_URL}
         onSuccess={(nextToken, nextUser) => {
+          setActivities([]);
+          setMeals([]);
+          setGoals(defaultGoals);
+          setMetrics(emptyMetrics);
           setToken(nextToken);
           setUser(nextUser);
           setAuthModalOpen(false);

@@ -27,3 +27,19 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
     next();
   });
 };
+
+export const optionalAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return next();
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (!err && user) {
+      req.user = user as { id: number; username: string; email: string };
+    }
+    next();
+  });
+};
